@@ -406,10 +406,8 @@ def calc_period(df, coupon_rate, days, is_fund=False):
     actual_days = (sub["date"].iloc[-1] - sub["date"].iloc[0]).days
     if actual_days == 0:
         return None
-    price_ret = (ep - sp) / sp
-    if is_fund:
-        return {"price": price_ret, "coupon": 0.0, "total": price_ret}
-    coupon_ret = (coupon_rate / 100) * (actual_days / 365)
+    price_ret  = (ep - sp) / sp
+    coupon_ret = (coupon_rate / 100) * (actual_days / 365) if coupon_rate > 0 else 0.0
     return {"price": price_ret, "coupon": coupon_ret, "total": price_ret + coupon_ret}
 
 def calc_annual(df, coupon_rate, is_fund=False):
@@ -422,8 +420,8 @@ def calc_annual(df, coupon_rate, is_fund=False):
             continue
         sp, ep = ydf["close"].iloc[0], ydf["close"].iloc[-1]
         days = (ydf["date"].iloc[-1] - ydf["date"].iloc[0]).days
-        price_ret = (ep - sp) / sp
-        coupon_ret = 0.0 if is_fund else ((coupon_rate / 100) * (days / 365) if days > 0 else 0)
+        price_ret  = (ep - sp) / sp
+        coupon_ret = (coupon_rate / 100) * (days / 365) if days > 0 and coupon_rate > 0 else 0.0
         rows.append({"year": str(year), "price": price_ret,
                      "coupon": coupon_ret, "total": price_ret + coupon_ret})
     return rows
@@ -935,24 +933,28 @@ for i in range(n):
         sheet_id = display_to_sheet.get(selected_display) if selected_display != "（請選擇）" else None
         isin = display_to_isin.get(selected_display, "") if selected_display != "（請選擇）" else ""
 
-        # 從預載快取取債券資訊
+        # 從預載快取取債券/基金資訊
+        is_fund_selected = selected_display.startswith("【基金】") if selected_display != "（請選擇）" else False
+
         if sheet_id and isin and isin in bond_info_cache:
             info = bond_info_cache[isin]
-            issuer = info["issuer"]
-            auto_coupon = info["coupon"]
-            maturity = info["maturity"]
-            default_name = f"{issuer} {auto_coupon}% {maturity}".strip()
-            default_coupon = auto_coupon
+            auto_coupon = info.get("coupon", 0.0)
+            maturity    = info.get("maturity", "")
+            issuer      = info.get("issuer", "")
             if st.session_state.get(f"last_sel_{i}") != selected_display:
-                st.session_state[f"name_{i}"] = default_name
-                st.session_state[f"coupon_{i}"] = default_coupon
+                st.session_state[f"name_{i}"]     = f"{issuer} {auto_coupon}% {maturity}".strip() if not is_fund_selected else issuer
+                st.session_state[f"coupon_{i}"]   = auto_coupon
                 st.session_state[f"last_sel_{i}"] = selected_display
-            if auto_coupon > 0:
+            if auto_coupon > 0 and not is_fund_selected:
                 st.success(f"✅ {isin}｜票息 {auto_coupon}%｜到期 {maturity}")
+            elif is_fund_selected:
+                st.info("📊 基金｜請在下方填入年化配息率")
         else:
             if st.session_state.get(f"last_sel_{i}") != selected_display:
-                st.session_state[f"name_{i}"] = ""
-                st.session_state[f"coupon_{i}"] = 0.0
+                st.session_state[f"name_{i}"]     = ""
+                # 基金不重置coupon，讓使用者自填；債券才重置
+                if not is_fund_selected:
+                    st.session_state[f"coupon_{i}"] = 0.0
                 st.session_state[f"last_sel_{i}"] = selected_display
 
         name = st.text_input("債券名稱（可修改）", placeholder="例：Apple 3% 2027", key=f"name_{i}")
